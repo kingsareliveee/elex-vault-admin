@@ -1,0 +1,93 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --color-obsidian-950: #06070a;
+  --color-obsidian-900: #0b0d16;
+  --color-obsidian-850: #101322;
+  --color-obsidian-800: #141829;
+  --color-obsidian-700: #20263f;
+  --color-obsidian-600: #333d65;
+  
+  --color-admin-green: #10b981;
+  --color-admin-red: #ef4444;
+  --color-admin-blue: #3b82f6;
+  --color-admin-amber: #f59e0b;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-obsidian-950);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-obsidian-700);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-obsidian-600);
+}
+
+/* Base Body Styles */
+body {
+  background-color: var(--color-obsidian-950);
+  color: #f4f4f5;
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+}
+
+/* Premium Main ELEX-DAVV Navy Background Gradient */
+.elex-navy-bg {
+  background: radial-gradient(circle at 50% 0%, #0a1329 0%, #05070c 100%);
+}
+
+.elex-grid-overlay {
+  background-image: 
+    linear-gradient(to right, rgba(148, 163, 184, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.04) 1px, transparent 1px);
+  background-size: 50px 50px;
+}
+
+/* Metallic slate/zinc fine borders */
+.slate-border {
+  border: 1px solid rgba(148, 163, 184, 0.08);
+}
+
+/* Premium Glassmorphic Cards */
+.glass-panel {
+  background: rgba(11, 13, 22, 0.65);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(148, 163, 184, 0.08);
+}
+
+.glass-panel-heavy {
+  background: rgba(6, 7, 10, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+/* Brutalist sharp containers */
+.brutalist-card {
+  border-radius: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.09);
+  background-color: rgba(16, 19, 34, 0.4);
+}
+
+/* Simple Micro-animations */
+.hover-lift {
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.hover-lift:hover {
+  transform: translateY(-1px);
+  border-color: rgba(59, 130, 246, 0.3);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
