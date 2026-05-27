@@ -183,7 +183,8 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ resource, onBack }) => {
                   <div className="flex justify-between"><span className="text-zinc-500">Semester</span><span className="text-zinc-300 font-bold">Semester {resource.semester}</span></div>
                   <div className="flex justify-between"><span className="text-zinc-500">Course</span><span className="text-zinc-300 font-bold truncate max-w-[170px]">{resource.course}</span></div>
                   <div className="flex justify-between"><span className="text-zinc-500">Resource</span><span className="text-blue-500 font-bold uppercase">{resource.resourceType}</span></div>
-                  <div className="flex justify-between"><span className="text-zinc-500">Status</span><span className={`px-2 py-0.5 text-[9px] rounded font-bold uppercase ${
+                  <div className="flex justify-between"><span className="text-zinc-500">Exam Year</span><span className="text-zinc-300 font-bold font-mono">{resource.examYear || 'N/A'}</span></div>
+                  <div className="flex justify-between"><span className="text-zinc-550">Status</span><span className={`px-2 py-0.5 text-[9px] rounded font-bold uppercase ${
                     resource.status === 'approved' ? 'text-green-500 bg-green-500/10 border border-green-500/20' :
                     resource.status === 'rejected' ? 'text-red-500 bg-red-500/10 border border-red-500/20' :
                     'text-amber-500 bg-amber-500/10 border border-amber-500/20'

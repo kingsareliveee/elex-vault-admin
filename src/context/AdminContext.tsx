@@ -25,6 +25,7 @@ export interface Resource {
   isApproved: boolean;
   rejectionReason?: string;
   fileSize: string;
+  examYear?: string;
   pagesCount: number;
   downloads: number;
   previewUrl: string;
@@ -144,7 +145,8 @@ const mapDbRowToResource = (row: any): Resource => {
     downloads: 0,
     previewUrl: row.file_url || '',
     comments: [],
-    hash: `SHA256:${row.id.toString().substring(0, 8)}`
+    hash: `SHA256:${row.id.toString().substring(0, 8)}`,
+    examYear: row.exam_year ? row.exam_year.toString() : 'N/A'
   };
 };
 

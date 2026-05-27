@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { useAdmin } from '../context/AdminContext';
-import { BarChart3, TrendingUp, Compass, Activity, CheckSquare } from 'lucide-react';
+import { BarChart3, TrendingUp, Compass, Activity, CheckSquare, Trophy } from 'lucide-react';
 
 export const Analytics: React.FC = () => {
   const { resources, auditLogs, refreshResources } = useAdmin();
@@ -32,6 +32,21 @@ export const Analytics: React.FC = () => {
     label: code,
     value: count,
   })).sort((a, b) => b.value - a.value);
+
+  // Top Contributors logic
+  const contributorCounts = resources
+    .filter(r => r.isApproved)
+    .reduce((acc: Record<string, number>, curr) => {
+      const name = curr.contributorName || 'Anonymous';
+      if (name.toLowerCase() === 'anonymous' || name.toLowerCase() === 'system') return acc;
+      acc[name] = (acc[name] || 0) + 1;
+      return acc;
+    }, {});
+
+  const topContributors = Object.entries(contributorCounts)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5);
 
   // SVG dimensions for weekly chart
   const wWidth = 600;
@@ -287,6 +302,35 @@ export const Analytics: React.FC = () => {
           </div>
         </div>
 
+      </div>
+
+      {/* Community & Contributors */}
+      <div className="grid grid-cols-1 gap-6">
+        <div className="glass-panel p-5 rounded-xl border border-zinc-800 space-y-4 shadow-sm">
+          <div className="flex items-center space-x-2 text-white border-b border-zinc-850 pb-2">
+            <Trophy className="h-4.5 w-4.5 text-yellow-500" />
+            <h4 className="text-xs font-bold uppercase tracking-wider">Top Contributors Leaderboard</h4>
+          </div>
+          
+          {topContributors.length === 0 ? (
+            <div className="text-center py-6 text-zinc-550 text-xs">
+              No contributor data available yet.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 pt-2">
+              {topContributors.map((user, idx) => (
+                <div key={user.name} className="p-3 bg-obsidian-950 border border-zinc-850 rounded-lg flex flex-col items-center justify-center space-y-2 relative overflow-hidden group">
+                  <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-yellow-500/0 via-yellow-500/50 to-yellow-500/0 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                  <div className="text-[10px] font-black text-zinc-600 bg-zinc-900 rounded-full h-5 w-5 flex items-center justify-center mb-1">
+                    #{idx + 1}
+                  </div>
+                  <span className="text-xs font-bold text-zinc-200 truncate w-full text-center" title={user.name}>{user.name}</span>
+                  <span className="text-[10px] text-zinc-400 uppercase tracking-wider font-mono">{user.count} Papers</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
     </div>

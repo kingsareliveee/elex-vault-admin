@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useAdmin } from '../context/AdminContext';
 import { supabase } from '../supabaseClient';
-import { Eye, Check, X, Trash2, Search, SlidersHorizontal, AlertCircle, Loader2 } from 'lucide-react';
+import { Eye, Check, X, Trash2, Search, SlidersHorizontal, AlertCircle, Loader2, AlertTriangle, ShieldAlert } from 'lucide-react';
 
 export const PendingQueue: React.FC = () => {
-  const { approveResource, rejectResource, deleteResource, setSelectedResourceId, setActivePage, refreshResources } = useAdmin();
+  const { approveResource, rejectResource, deleteResource, setSelectedResourceId, setActivePage, refreshResources, resources } = useAdmin();
 
   // Local state for pending resources with isolated state
   const [pendingResources, setPendingResources] = useState<any[]>([]);
@@ -21,6 +21,36 @@ export const PendingQueue: React.FC = () => {
   // Rejection states
   const [rejectId, setRejectId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
+
+  // Confirmation Modal State
+  const [confirmAction, setConfirmAction] = useState<{
+    isOpen: boolean;
+    id: string | null;
+    action: 'approve' | 'delete' | 'replace' | null;
+    duplicateId?: string;
+    title: string;
+    message: string;
+  }>({ isOpen: false, id: null, action: null, title: '', message: '' });
+
+  // Helper for suspicious names
+  const isSuspiciousName = (name: string) => {
+    if (!name) return true;
+    const lower = name.toLowerCase().trim();
+    const suspiciousExact = ['xyz', 'abc', 'test', 'anonymous', 'admin', 'qwerty', 'user', 'unknown'];
+    if (suspiciousExact.includes(lower)) return true;
+    if (/^\d+$/.test(lower) || lower.length <= 2) return true;
+    return false;
+  };
+
+  const checkDuplicate = (res: any) => {
+    const duplicates = resources.filter(r => 
+      r.isApproved === true &&
+      r.subjectCode === res.subjectCode &&
+      r.resourceType === res.resourceType &&
+      r.examYear === res.examYear
+    );
+    return duplicates.length > 0 ? duplicates[0] : null;
+  };
 
   const fetchPendingResources = async () => {
     setLoading(true);
@@ -45,7 +75,8 @@ export const PendingQueue: React.FC = () => {
           course: row.course,
           subjectCode: row.subject_code,
           resourceType: row.resource_type,
-          isApproved: row.is_approved
+          isApproved: row.is_approved,
+          uploadDate: row.created_at || new Date().toISOString()
         }));
 
         console.log("MAPPED PENDING RESOURCES:", mapped);
@@ -119,13 +150,25 @@ export const PendingQueue: React.FC = () => {
     setActivePage('viewer');
   };
 
-  const handleApprove = async (id: string) => {
-    if (confirm('Approve this paper and publish to the ELEX Vault?')) {
-      await approveResource(String(id));
-      await fetchPendingResources();
-      if (refreshResources) {
-        await refreshResources();
-      }
+  const handleApproveClick = (res: any) => {
+    const duplicate = checkDuplicate(res);
+    if (duplicate) {
+      setConfirmAction({
+        isOpen: true,
+        id: res.id,
+        action: 'replace',
+        duplicateId: duplicate.id,
+        title: 'Duplicate Detected',
+        message: `An approved paper already exists for ${res.subjectCode} (${res.resourceType} ${res.examYear}). Do you want to replace it or approve it alongside?`
+      });
+    } else {
+      setConfirmAction({
+        isOpen: true,
+        id: res.id,
+        action: 'approve',
+        title: 'Confirm Approval',
+        message: 'Are you sure you want to approve this paper and publish it to the ELEX Vault?'
+      });
     }
   };
 
@@ -145,13 +188,40 @@ export const PendingQueue: React.FC = () => {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (confirm(`Confirm permanent deletion and storage purge of upload ${id}?`)) {
-      await deleteResource(String(id));
+  const handleDeleteClick = (id: string) => {
+    setConfirmAction({
+      isOpen: true,
+      id: String(id),
+      action: 'delete',
+      title: 'Confirm Deletion',
+      message: 'Are you sure you want to permanently delete this paper from the database and storage? This action cannot be undone.'
+    });
+  };
+
+  const handleConfirmAction = async (forceApproveDuplicate = false) => {
+    const { action, id, duplicateId } = confirmAction;
+    if (!id || !action) return;
+
+    try {
+      if (action === 'approve' || forceApproveDuplicate) {
+        await approveResource(String(id));
+      } else if (action === 'delete') {
+        await deleteResource(String(id));
+      } else if (action === 'replace') {
+        if (duplicateId) {
+          await deleteResource(String(duplicateId)); // Delete old
+        }
+        await approveResource(String(id)); // Approve new
+      }
+      
+      setConfirmAction({ isOpen: false, id: null, action: null, title: '', message: '' });
       await fetchPendingResources();
       if (refreshResources) {
         await refreshResources();
       }
+    } catch (error) {
+      console.error('Action failed:', error);
+      setLocalError('Failed to execute action.');
     }
   };
 
@@ -273,10 +343,28 @@ export const PendingQueue: React.FC = () => {
                   {filteredList.map((res) => (
                     <tr key={res.id} className="hover:bg-zinc-800/10 transition-colors">
                       <td className="px-5 py-3.5 font-bold text-zinc-400 font-mono">{String(res.id)}</td>
-                      <td className="px-5 py-3.5 font-semibold text-zinc-200">{res.contributorName || 'Anonymous'}</td>
+                      <td className="px-5 py-3.5">
+                        <div className="font-semibold text-zinc-200 flex items-center space-x-1.5">
+                          <span>{res.contributorName || 'Anonymous'}</span>
+                          {isSuspiciousName(res.contributorName) && (
+                            <span title="Suspicious Contributor Name" className="flex shrink-0">
+                              <ShieldAlert className="h-3.5 w-3.5 text-amber-500" />
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-zinc-500 mt-0.5 font-mono">
+                          {new Date(res.uploadDate).toLocaleString()}
+                        </div>
+                      </td>
                       <td className="px-5 py-3.5">
                         <div className="font-bold text-zinc-200">{res.subjectCode || 'N/A'}</div>
                         <div className="text-[10px] text-zinc-450 mt-0.5 truncate max-w-[200px]" title={res.subjectName}>{res.subjectName || 'Unknown Subject'}</div>
+                        {checkDuplicate(res) && (
+                          <div className="mt-1.5 inline-flex items-center text-[9px] text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold tracking-wide uppercase">
+                            <AlertTriangle className="h-2.5 w-2.5 mr-1" />
+                            Duplicate Exists
+                          </div>
+                        )}
                       </td>
                       <td className="px-5 py-3.5">
                         <span className="text-zinc-200">
@@ -303,7 +391,7 @@ export const PendingQueue: React.FC = () => {
                           
                           {/* Approve */}
                           <button
-                            onClick={() => handleApprove(res.id)}
+                            onClick={() => handleApproveClick(res)}
                             className="p-2 bg-green-500/10 border border-green-500/20 hover:bg-green-500 hover:text-black hover:border-transparent text-green-500 rounded-lg transition-all cursor-pointer"
                             title="Approve Resource"
                           >
@@ -321,7 +409,7 @@ export const PendingQueue: React.FC = () => {
                           
                           {/* Purge */}
                           <button
-                            onClick={() => handleDelete(res.id)}
+                            onClick={() => handleDeleteClick(res.id)}
                             className="p-2 bg-obsidian-950 border border-zinc-850 hover:bg-red-500/10 hover:border-red-550/30 hover:text-red-500 text-zinc-500 rounded-lg transition-all cursor-pointer"
                             title="Direct Purge"
                           >
@@ -348,9 +436,30 @@ export const PendingQueue: React.FC = () => {
                       <span className="text-[10px] text-zinc-500 font-mono">{res.examYear || 'N/A'}</span>
                     </div>
 
-                    <div className="space-y-1">
+                    <div className="space-y-1.5">
                       <h4 className="font-bold text-zinc-200 text-xs">{res.subjectCode || 'N/A'} - {res.subjectName || 'Unknown Subject'}</h4>
-                      <p className="text-[11px] text-zinc-400">Contributor: <span className="text-zinc-300 font-semibold">{res.contributorName || 'Anonymous'}</span></p>
+                      
+                      {checkDuplicate(res) && (
+                        <div className="inline-flex items-center text-[9px] text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold tracking-wide uppercase">
+                          <AlertTriangle className="h-2.5 w-2.5 mr-1" />
+                          Duplicate Exists
+                        </div>
+                      )}
+                      
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center text-[11px] text-zinc-400">
+                          Contributor: <span className="text-zinc-300 font-semibold ml-1">{res.contributorName || 'Anonymous'}</span>
+                          {isSuspiciousName(res.contributorName) && (
+                            <span title="Suspicious Contributor Name" className="inline-flex ml-1.5 shrink-0">
+                              <ShieldAlert className="h-3.5 w-3.5 text-amber-500" />
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-zinc-500 font-mono">
+                          {new Date(res.uploadDate).toLocaleString()}
+                        </div>
+                      </div>
+                      
                       <p className="text-[11px] text-zinc-400">Course & Sem: <span className="text-zinc-350">
                         {res.course === 'bsc' ? 'BSc Electronics' : res.course === 'imtech' ? 'Integrated MTech Electronics' : res.course || 'General'} (Sem {res.semester || 'N/A'})
                       </span></p>
@@ -368,7 +477,7 @@ export const PendingQueue: React.FC = () => {
 
                       {/* Approve */}
                       <button
-                        onClick={() => handleApprove(res.id)}
+                        onClick={() => handleApproveClick(res)}
                         className="px-2.5 py-1.5 bg-green-500/10 border border-green-500/20 hover:bg-green-500 hover:text-black hover:border-transparent text-green-500 rounded-lg flex items-center gap-1 transition font-semibold"
                       >
                         <Check className="h-3 w-3" />
@@ -386,7 +495,7 @@ export const PendingQueue: React.FC = () => {
 
                       {/* Purge */}
                       <button
-                        onClick={() => handleDelete(res.id)}
+                        onClick={() => handleDeleteClick(res.id)}
                         className="p-1.5 bg-obsidian-950 border border-zinc-850 hover:bg-red-550/10 hover:border-red-550/30 text-zinc-500 rounded-lg transition"
                       >
                         <Trash2 className="h-3 w-3" />
@@ -437,6 +546,63 @@ export const PendingQueue: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ACTION CONFIRMATION MODAL */}
+      {confirmAction.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 select-none">
+          <div className="w-full max-w-md bg-obsidian-900 border border-zinc-800 rounded-xl p-6 shadow-2xl">
+            <div className="flex items-center space-x-2.5 text-zinc-200 border-b border-zinc-850 pb-3 mb-4">
+              {confirmAction.action === 'delete' ? (
+                <Trash2 className="h-5 w-5 text-red-500" />
+              ) : confirmAction.action === 'replace' ? (
+                <AlertTriangle className="h-5 w-5 text-amber-500" />
+              ) : (
+                <Check className="h-5 w-5 text-green-500" />
+              )}
+              <h3 className="text-sm font-bold uppercase tracking-wider">{confirmAction.title}</h3>
+            </div>
+            
+            <p className="text-xs text-zinc-350 mb-6 leading-relaxed">
+              {confirmAction.message}
+            </p>
+
+            <div className="flex justify-end gap-2.5 text-xs font-semibold">
+              <button
+                onClick={() => setConfirmAction({ isOpen: false, id: null, action: null, title: '', message: '' })}
+                className="px-4 py-2 rounded-lg border border-zinc-800 bg-obsidian-950 text-zinc-450 hover:text-zinc-200 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              
+              {confirmAction.action === 'replace' ? (
+                <>
+                  <button
+                    onClick={() => handleConfirmAction(true)}
+                    className="px-4 py-2 rounded-lg border border-amber-500/20 bg-amber-500/10 text-amber-500 hover:bg-amber-500 hover:text-black transition cursor-pointer"
+                  >
+                    Approve Anyway
+                  </button>
+                  <button
+                    onClick={() => handleConfirmAction()}
+                    className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition cursor-pointer"
+                  >
+                    Replace Existing
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => handleConfirmAction()}
+                  className={`px-4 py-2 rounded-lg text-white transition cursor-pointer ${
+                    confirmAction.action === 'delete' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
+                  }`}
+                >
+                  Confirm {confirmAction.action === 'delete' ? 'Deletion' : 'Approval'}
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
