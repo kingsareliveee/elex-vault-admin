@@ -40,7 +40,7 @@ export const ApprovedResources: React.FC = () => {
       let query = supabase
         .from("elex_papers")
         .select("*", { count: 'exact' })
-        .eq("is_approved", true);
+        .or('moderation_status.eq.approved,and(moderation_status.is.null,is_approved.eq.true)');
 
       if (filterCourse !== 'ALL') {
         const val = filterCourse === 'BSc Electronics' ? 'bsc' : 'imtech';
@@ -140,9 +140,9 @@ export const ApprovedResources: React.FC = () => {
   };
 
   return (
-    <div className="p-4 sm:p-6 space-y-6 font-sans select-none">
+    <div className="p-4 space-y-4 font-sans select-none">
       {/* Filters */}
-      <div className="glass-panel p-4 sm:p-5 rounded-xl border border-zinc-800 space-y-4">
+      <div className="glass-panel p-4 rounded-xl border border-zinc-800 space-y-4">
         <div className="flex items-center justify-between text-white border-b border-zinc-850 pb-3 mb-1">
           <div className="flex items-center space-x-2">
             <SlidersHorizontal className="h-4 w-4 text-green-500" />
@@ -227,9 +227,15 @@ export const ApprovedResources: React.FC = () => {
               <p className="text-xs text-zinc-550">Fetching database records...</p>
             </div>
           ) : filteredList.length === 0 ? (
-            <div className="text-center py-16 text-zinc-500 text-xs space-y-2">
-              <AlertCircle className="h-8 w-8 mx-auto text-zinc-650" />
-              <p>No approved resources found matching search filters.</p>
+            <div className="flex flex-col items-center justify-center py-16 space-y-3 text-center">
+              <div className="relative flex items-center justify-center h-10 w-10 rounded-full bg-blue-500/10 border border-blue-500/20">
+                <Database className="h-4 w-4 text-blue-500/50" />
+                <div className="absolute h-full w-full rounded-full border border-blue-500/30 animate-ping" style={{ animationDuration: '3s' }}></div>
+              </div>
+              <div>
+                <p className="text-zinc-300 font-bold uppercase tracking-wide">Database Coverage Sync Complete</p>
+                <p className="text-zinc-500 text-[11px] mt-1">No active records found for current filters</p>
+              </div>
             </div>
           ) : (
             <>

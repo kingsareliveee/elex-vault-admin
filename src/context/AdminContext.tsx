@@ -150,8 +150,8 @@ export const mapDbRowToResource = (row: any): Resource => {
     course: courseLabel || 'General',
     resourceType: typeMap[row.resource_type] || row.resource_type || 'EndSem',
     uploadDate: safeFormatDate(row.created_at),
-    isApproved: row.is_approved === true || row.is_approved === 'true',
-    status: (row.is_approved === true || row.is_approved === 'true') ? 'approved' : 'pending',
+    isApproved: row.moderation_status === 'approved' || (row.moderation_status == null && (row.is_approved === true || row.is_approved === 'true')),
+    status: row.moderation_status || ((row.is_approved === true || row.is_approved === 'true') ? 'approved' : 'pending'),
     fileSize: '2.4 MB',
     pagesCount: 6,
     downloads: 0,
@@ -293,34 +293,15 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const refreshResources = async () => {
     setIsLoading(true);
     try {
-      // Correctly query pending resources (is_approved = false)
-      const { data: pendingData, error: pendingError } = await supabase
+      // Fetch all resources since we now use moderation_status and need rejected resources for analytics
+      const { data, error } = await supabase
         .from('elex_papers')
         .select('*')
-        .eq('is_approved', false)
         .order('created_at', { ascending: false });
 
-      console.log("RAW SUPABASE RESPONSE (PENDING):", pendingData);
-      console.log("SUPABASE ERROR (PENDING):", pendingError);
-      if (pendingData && pendingData.length > 0) {
-        console.log("TYPE OF is_approved (PENDING):", typeof pendingData[0]?.is_approved);
-      }
+      if (error) throw error;
 
-      if (pendingError) throw pendingError;
-
-      // Correctly query approved resources (is_approved = true)
-      const { data: approvedData, error: approvedError } = await supabase
-        .from('elex_papers')
-        .select('*')
-        .eq('is_approved', true)
-        .order('created_at', { ascending: false });
-
-      if (approvedError) throw approvedError;
-
-      const combined = [
-        ...(pendingData || []).map(mapDbRowToResource),
-        ...(approvedData || []).map(mapDbRowToResource)
-      ];
+      const combined = (data || []).map(mapDbRowToResource);
       setResources(combined);
       console.log("Fetched Resources:", combined);
       console.log(
@@ -515,7 +496,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     try {
       const { error } = await supabase
         .from('elex_papers')
-        .update({ is_approved: true })
+        .update({ is_approved: true, moderation_status: 'approved' })
         .eq('id', id);
 
       if (error) throw error;
@@ -533,32 +514,13 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const adminName = currentAdmin?.name || 'System';
     try {
       const targetRes = resources.find(r => r.id === id);
-      const storagePath = targetRes?.storagePath || '';
-      
-      if (storagePath) {
-        const { error: deleteStorageError } = await supabase.storage
-          .from('papers_pdf')
-          .remove([storagePath]);
-        if (deleteStorageError) {
-          console.error('Storage deletion warning:', deleteStorageError.message);
-        }
-      } else {
-        const fileUrl = targetRes?.previewUrl;
-        if (fileUrl) {
-          const fileName = getFileNameFromUrl(fileUrl);
-          if (fileName) {
-            await supabase.storage.from('papers_pdf').remove([fileName]);
-          }
-        }
-      }
-
-      // Delete from database
-      const { error: deleteDbError } = await supabase
+      // Update in database instead of deleting to preserve rejection history
+      const { error: rejectDbError } = await supabase
         .from('elex_papers')
-        .delete()
+        .update({ is_approved: false, moderation_status: 'rejected' })
         .eq('id', id);
 
-      if (deleteDbError) throw deleteDbError;
+      if (rejectDbError) throw rejectDbError;
 
       addLog(adminName, 'REJECTED RESOURCE', `${id}: ${targetRes?.subjectName || 'Paper'} - Reason: ${reason}`, 'danger');
       await refreshResources();

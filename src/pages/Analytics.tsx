@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { useAdmin } from '../context/AdminContext';
 import { BarChart3, TrendingUp, Compass, Activity, CheckSquare, Trophy } from 'lucide-react';
+import { normalizeContributorName } from '../utils/formatters';
 
 export const Analytics: React.FC = () => {
   const { resources, auditLogs, refreshResources } = useAdmin();
@@ -10,10 +11,10 @@ export const Analytics: React.FC = () => {
   }, []);
 
   // Metrics calculations
-  const approved = resources.filter(r => r.isApproved === true).length;
-  const pending = resources.filter(r => r.isApproved === false).length;
-  const rejected = auditLogs.filter(log => log.action.includes('REJECTED')).length;
-  const total = approved + pending + rejected;
+  const approved = resources.filter(r => r.status === 'approved').length;
+  const pending = resources.filter(r => r.status === 'pending').length;
+  const rejected = resources.filter(r => r.status === 'rejected').length;
+  const total = resources.length;
 
 
 
@@ -35,10 +36,10 @@ export const Analytics: React.FC = () => {
 
   // Top Contributors logic
   const contributorCounts = resources
-    .filter(r => r.isApproved)
+    .filter(r => r.status === 'approved')
     .reduce((acc: Record<string, number>, curr) => {
-      const name = curr.contributorName || 'Anonymous';
-      if (name.toLowerCase() === 'anonymous' || name.toLowerCase() === 'system') return acc;
+      const name = normalizeContributorName(curr.contributorName);
+      if (name === 'Anonymous') return acc;
       acc[name] = (acc[name] || 0) + 1;
       return acc;
     }, {});
@@ -104,9 +105,9 @@ export const Analytics: React.FC = () => {
   });
 
   return (
-    <div className="p-6 space-y-6 font-sans select-none">
+    <div className="p-4 space-y-4 font-sans select-none">
       {/* Overview stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="glass-panel p-4 rounded-xl border border-zinc-800 flex items-center space-x-4">
           <div className="p-2.5 bg-blue-500/10 border border-blue-500/20 text-blue-500 rounded-lg">
             <Compass className="h-5 w-5" />
@@ -149,7 +150,7 @@ export const Analytics: React.FC = () => {
       </div>
 
       {/* Graphs Layout */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         
         {/* LINE GRAPH: Weekly Upload trends */}
         <div className="xl:col-span-2 bg-obsidian-900 border border-zinc-800 rounded-xl overflow-hidden flex flex-col shadow-sm">
@@ -209,8 +210,14 @@ export const Analytics: React.FC = () => {
 
           <div className="flex-1 p-5 flex flex-col justify-center items-center">
             {totalSubjectsCount === 0 ? (
-              <div className="text-center py-10 text-zinc-550 text-xs">
-                No papers registered in the database.
+              <div className="text-center py-10 flex flex-col items-center space-y-3">
+                <div className="relative flex items-center justify-center h-8 w-8 rounded-full bg-blue-500/10 border border-blue-500/20">
+                  <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse"></div>
+                </div>
+                <div>
+                  <p className="text-zinc-300 font-semibold text-xs uppercase tracking-wider">No Telemetry Data</p>
+                  <p className="text-zinc-500 text-[10px] mt-1">System awaiting input</p>
+                </div>
               </div>
             ) : (
               <div className="w-full flex flex-col sm:flex-row items-center justify-around gap-4 sm:gap-2">
@@ -258,7 +265,7 @@ export const Analytics: React.FC = () => {
       </div>
 
       {/* Bottom Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         
         {/* SLA Card */}
         <div className="glass-panel p-5 rounded-xl border border-zinc-800 space-y-4 shadow-sm">
@@ -307,16 +314,16 @@ export const Analytics: React.FC = () => {
       </div>
 
       {/* Community & Contributors */}
-      <div className="grid grid-cols-1 gap-6">
+      <div className="grid grid-cols-1 gap-4">
         <div className="glass-panel p-5 rounded-xl border border-zinc-800 space-y-4 shadow-sm">
           <div className="flex items-center space-x-2 text-white border-b border-zinc-850 pb-2">
             <Trophy className="h-4.5 w-4.5 text-yellow-500" />
             <h4 className="text-xs font-bold uppercase tracking-wider">Top Contributors Leaderboard</h4>
           </div>
-          
           {topContributors.length === 0 ? (
-            <div className="text-center py-6 text-zinc-550 text-xs">
-              No contributor data available yet.
+            <div className="text-center py-6 flex flex-col items-center space-y-2">
+              <p className="text-zinc-300 font-semibold text-xs uppercase tracking-wider">Leaderboard Empty</p>
+              <p className="text-zinc-500 text-[10px]">Awaiting approved contributions</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 pt-2">

@@ -59,7 +59,7 @@ export const PendingQueue: React.FC = () => {
 
   const checkDuplicate = (res: any) => {
     const duplicates = resources.filter(r => 
-      r.isApproved === true &&
+      r.status === 'approved' &&
       r.subjectCode === res.subjectCode &&
       r.resourceType === res.resourceType &&
       r.examYear === res.examYear
@@ -74,7 +74,7 @@ export const PendingQueue: React.FC = () => {
       let query = supabase
         .from("elex_papers")
         .select("*", { count: 'exact' })
-        .eq("is_approved", false);
+        .or('moderation_status.eq.pending,and(moderation_status.is.null,is_approved.eq.false)');
 
       if (filterCourse !== 'ALL') {
         const val = filterCourse === 'BSc Electronics' ? 'bsc' : 'imtech';
@@ -250,9 +250,9 @@ export const PendingQueue: React.FC = () => {
   };
 
   return (
-    <div className="p-4 sm:p-6 space-y-6 font-sans select-none">
+    <div className="p-4 space-y-4 font-sans select-none">
       {/* Search & Filter Header */}
-      <div className="glass-panel p-4 sm:p-5 rounded-xl border border-zinc-800 space-y-4">
+      <div className="glass-panel p-4 rounded-xl border border-zinc-800 space-y-4">
         <div className="flex items-center justify-between text-white border-b border-zinc-850 pb-3 mb-1">
           <div className="flex items-center space-x-2">
             <SlidersHorizontal className="h-4 w-4 text-blue-500" />
@@ -344,9 +344,15 @@ export const PendingQueue: React.FC = () => {
               <p className="text-xs text-zinc-550">Fetching queue records...</p>
             </div>
           ) : filteredList.length === 0 ? (
-            <div className="text-center py-16 text-zinc-500 text-xs space-y-2">
-              <AlertCircle className="h-8 w-8 mx-auto text-zinc-650" />
-              <p>No papers awaiting moderation in this queue category.</p>
+            <div className="flex flex-col items-center justify-center py-16 space-y-3 text-center">
+              <div className="relative flex items-center justify-center h-10 w-10 rounded-full bg-green-500/10 border border-green-500/20">
+                <div className="h-3 w-3 rounded-full bg-green-500 animate-pulse shadow-[0_0_10px_rgba(34,197,94,0.6)]"></div>
+                <div className="absolute h-full w-full rounded-full bg-green-500/20 animate-ping" style={{ animationDuration: '3s' }}></div>
+              </div>
+              <div>
+                <p className="text-zinc-300 font-bold uppercase tracking-wide">Review Queue Clear</p>
+                <p className="text-zinc-500 text-[11px] mt-1">Awaiting new submissions</p>
+              </div>
             </div>
           ) : (
             <>
