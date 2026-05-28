@@ -62,7 +62,7 @@ const AppContent: React.FC = () => {
     );
   }
 
-  const pendingCount = resources.filter(r => r.isApproved === false).length;
+  const pendingCount = resources.filter(r => r.status === 'pending').length;
 
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
