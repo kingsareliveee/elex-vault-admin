@@ -10,12 +10,12 @@ export const Analytics: React.FC = () => {
   }, []);
 
   // Metrics calculations
-  const total = resources.length;
   const approved = resources.filter(r => r.isApproved === true).length;
   const pending = resources.filter(r => r.isApproved === false).length;
   const rejected = auditLogs.filter(log => log.action.includes('REJECTED')).length;
+  const total = approved + pending + rejected;
 
-  const approvalRate = (approved + rejected) > 0 ? Math.round((approved / (approved + rejected)) * 100) : 100;
+
 
   // Custom upload activity chart logic
   const weeklyData = [12, 19, 15, 28, 22, approved, approved + pending];
@@ -42,6 +42,8 @@ export const Analytics: React.FC = () => {
       acc[name] = (acc[name] || 0) + 1;
       return acc;
     }, {});
+
+  const uniqueContributorsCount = Object.keys(contributorCounts).length;
 
   const topContributors = Object.entries(contributorCounts)
     .map(([name, count]) => ({ name, count }))
@@ -110,8 +112,8 @@ export const Analytics: React.FC = () => {
             <Compass className="h-5 w-5" />
           </div>
           <div>
-            <span className="text-[10px] text-zinc-500 block uppercase font-bold tracking-wider">Moderation Coverage</span>
-            <span className="text-xs text-zinc-200 font-bold uppercase">All academic terms</span>
+            <span className="text-[10px] text-zinc-500 block uppercase font-bold tracking-wider">Total Uploads</span>
+            <span className="text-xs text-zinc-200 font-bold uppercase">{total} All-Time Uploads</span>
           </div>
         </div>
 
@@ -120,8 +122,8 @@ export const Analytics: React.FC = () => {
             <CheckSquare className="h-5 w-5" />
           </div>
           <div>
-            <span className="text-[10px] text-zinc-500 block uppercase font-bold tracking-wider">Approval Rate</span>
-            <span className="text-xs text-green-500 font-bold">{approvalRate}% Approved</span>
+            <span className="text-[10px] text-zinc-500 block uppercase font-bold tracking-wider">Approved DB</span>
+            <span className="text-xs text-green-500 font-bold">{approved} Resources</span>
           </div>
         </div>
 
@@ -130,7 +132,7 @@ export const Analytics: React.FC = () => {
             <Activity className="h-5 w-5" />
           </div>
           <div>
-            <span className="text-[10px] text-zinc-500 block uppercase font-bold tracking-wider">Queue Latency</span>
+            <span className="text-[10px] text-zinc-500 block uppercase font-bold tracking-wider">Pending Reviews</span>
             <span className="text-xs text-amber-500 font-bold">{pending} Items Awaiting</span>
           </div>
         </div>
@@ -140,8 +142,8 @@ export const Analytics: React.FC = () => {
             <TrendingUp className="h-5 w-5" />
           </div>
           <div>
-            <span className="text-[10px] text-zinc-500 block uppercase font-bold tracking-wider">Total Database Size</span>
-            <span className="text-xs text-purple-400 font-bold">{total} Registered Papers</span>
+            <span className="text-[10px] text-zinc-500 block uppercase font-bold tracking-wider">Contributors</span>
+            <span className="text-xs text-purple-400 font-bold">{uniqueContributorsCount} Unique Uploaders</span>
           </div>
         </div>
       </div>

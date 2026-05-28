@@ -26,6 +26,7 @@ export interface Resource {
   rejectionReason?: string;
   fileSize: string;
   examYear?: string;
+  storagePath?: string;
   pagesCount: number;
   downloads: number;
   previewUrl: string;
@@ -58,6 +59,7 @@ interface AdminContextType {
   auditLogs: AuditLog[];
   activePage: PageRoute;
   selectedResourceId: string | null;
+  selectedResource: Resource | null;
   searchQuery: string;
   isLoading: boolean;
   authLoading: boolean;
@@ -71,7 +73,7 @@ interface AdminContextType {
   approveResource: (id: string) => Promise<void>;
   rejectResource: (id: string, reason: string) => Promise<void>;
   deleteResource: (id: string) => Promise<void>;
-  addComment: (id: string, text: string) => void;
+  addComment: (id: string, text: string) => Promise<void>;
   updateSettings: (profile: { name: string; email: string }, preferences: any) => void;
   settings: {
     maxUploadSize: number;
@@ -85,24 +87,36 @@ interface AdminContextType {
 
 const AdminContext = createContext<AdminContextType | undefined>(undefined);
 
-// Helper to extract filename from URL
-const getFileNameFromUrl = (url: string): string => {
+// Safe date formatting helper to prevent blank screen crashes on invalid timestamps
+export const safeFormatDate = (dateStr?: string | null): string => {
+  if (!dateStr) return new Date().toISOString().replace('T', ' ').substring(0, 19);
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) {
+      return new Date().toISOString().replace('T', ' ').substring(0, 19);
+    }
+    return d.toISOString().replace('T', ' ').substring(0, 19);
+  } catch (err) {
+    console.error('Invalid date string:', dateStr, err);
+    return new Date().toISOString().replace('T', ' ').substring(0, 19);
+  }
+};
+
+// Extract bucket filename from Supabase storage URL
+export const getFileNameFromUrl = (url: string): string => {
+  if (!url) return '';
   try {
     const decodedUrl = decodeURIComponent(url);
-    const parts = decodedUrl.split('/papers_pdf/');
-    if (parts.length > 1) {
-      return parts[parts.length - 1];
-    }
-    const urlParts = decodedUrl.split('/');
-    return urlParts[urlParts.length - 1] || '';
+    const parts = decodedUrl.split('/');
+    return parts[parts.length - 1] || '';
   } catch (err) {
     console.error('Error parsing file URL:', err);
-    return '';
+    return url.split('/').pop() || '';
   }
 };
 
 // Map DB Row to Resource Interface
-const mapDbRowToResource = (row: any): Resource => {
+export const mapDbRowToResource = (row: any): Resource => {
   const typeMap: Record<string, ResourceType> = {
     mst_1: 'MST 1',
     mst_2: 'MST 2',
@@ -135,9 +149,7 @@ const mapDbRowToResource = (row: any): Resource => {
     semester: semNumber,
     course: courseLabel || 'General',
     resourceType: typeMap[row.resource_type] || row.resource_type || 'EndSem',
-    uploadDate: row.created_at 
-      ? new Date(row.created_at).toISOString().replace('T', ' ').substring(0, 19) 
-      : new Date().toISOString().replace('T', ' ').substring(0, 19),
+    uploadDate: safeFormatDate(row.created_at),
     isApproved: row.is_approved === true || row.is_approved === 'true',
     status: (row.is_approved === true || row.is_approved === 'true') ? 'approved' : 'pending',
     fileSize: '2.4 MB',
@@ -146,7 +158,8 @@ const mapDbRowToResource = (row: any): Resource => {
     previewUrl: row.file_url || '',
     comments: [],
     hash: `SHA256:${row.id.toString().substring(0, 8)}`,
-    examYear: row.exam_year ? row.exam_year.toString() : 'N/A'
+    examYear: row.exam_year ? row.exam_year.toString() : 'N/A',
+    storagePath: row.storage_path || ''
   };
 };
 
@@ -188,12 +201,10 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [isLoading, setIsLoading] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => {
-    const saved = localStorage.getItem('elex_audit_logs');
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [activePage, setActivePage] = useState<PageRoute>('login');
-  const [selectedResourceId, setSelectedResourceId] = useState<string | null>(null);
+  const [selectedResourceId, setSelectedResourceIdState] = useState<string | null>(null);
+  const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
   const [settings, setSettings] = useState({
@@ -203,6 +214,80 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     requireMultiApproval: false,
     notifyOnUpload: true,
   });
+
+  const fetchCommentsForSelected = async (id: string) => {
+    try {
+      const { data: commentsData, error: commentsError } = await supabase
+        .from('elex_paper_comments')
+        .select('id, admin_email, comment, created_at')
+        .eq('paper_id', id)
+        .order('created_at', { ascending: true });
+
+      if (commentsError) throw commentsError;
+
+      const mappedComments = (commentsData || []).map((c: any) => ({
+        id: c.id.toString(),
+        author: c.admin_email || 'System',
+        text: c.comment || '',
+        date: safeFormatDate(c.created_at)
+      }));
+
+      setSelectedResource(prev => {
+        if (prev && prev.id === id) {
+          return { ...prev, comments: mappedComments };
+        }
+        return prev;
+      });
+    } catch (err) {
+      console.error('Error loading comments:', err);
+    }
+  };
+
+  const setSelectedResourceId = async (id: string | null) => {
+    setSelectedResourceIdState(id);
+    if (id === null) {
+      setSelectedResource(null);
+    } else {
+      setSelectedResource(null);
+      setIsLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from('elex_papers')
+          .select('*')
+          .eq('id', id)
+          .single();
+
+        if (error) throw error;
+        if (data) {
+          const mappedResource = mapDbRowToResource(data);
+          setSelectedResource(mappedResource);
+          
+          // Now fetch comments for this paper
+          const { data: commentsData, error: commentsError } = await supabase
+            .from('elex_paper_comments')
+            .select('id, admin_email, comment, created_at')
+            .eq('paper_id', id)
+            .order('created_at', { ascending: true });
+
+          if (commentsError) throw commentsError;
+
+          const mappedComments = (commentsData || []).map((c: any) => ({
+            id: c.id.toString(),
+            author: c.admin_email || 'System',
+            text: c.comment || '',
+            date: safeFormatDate(c.created_at)
+          }));
+
+          mappedResource.comments = mappedComments;
+          setSelectedResource({ ...mappedResource });
+        }
+      } catch (err) {
+        console.error('Error loading resource detail:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+  };
 
   // Fetch Resources from Supabase
   const refreshResources = async () => {
@@ -242,6 +327,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         "Pending Resources:",
         combined.filter(r => r.isApproved === false)
       );
+      await refreshAuditLogs();
     } catch (err) {
       console.error('Error fetching papers from Supabase:', err);
     } finally {
@@ -306,21 +392,64 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
   }, []);
 
-  // Save logs to local storage
-  useEffect(() => {
-    localStorage.setItem('elex_audit_logs', JSON.stringify(auditLogs));
-  }, [auditLogs]);
+  const refreshAuditLogs = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('elex_audit_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
 
-  const addLog = (adminName: string, action: string, target: string, type: AuditLog['type']) => {
-    const newLog: AuditLog = {
-      id: `LOG-${Math.floor(1000 + Math.random() * 9000)}`,
-      adminName,
-      action,
-      target,
-      timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-      type,
-    };
-    setAuditLogs(prev => [newLog, ...prev]);
+      if (error) throw error;
+
+      const mapped = (data || []).map(row => {
+        let actionStr = row.action || '';
+        let targetStr = `Resource ID: ${row.paper_id || 'N/A'}`;
+        if (actionStr.includes(' - ')) {
+          const parts = actionStr.split(' - ');
+          actionStr = parts[0];
+          targetStr = parts.slice(1).join(' - ');
+        }
+        
+        return {
+          id: row.id.toString(),
+          adminName: row.admin_email ? row.admin_email.split('@')[0] : 'System',
+          action: actionStr,
+          target: targetStr,
+          timestamp: row.created_at
+            ? new Date(row.created_at).toISOString().replace('T', ' ').substring(0, 19)
+            : new Date().toISOString().replace('T', ' ').substring(0, 19),
+          type: (actionStr.includes('APPROVED') || actionStr.includes('AUTHENTICATED')) ? 'success' :
+                (actionStr.includes('REJECTED') || actionStr.includes('DELETED') || actionStr.includes('TERMINATED')) ? 'danger' : 'info' as AuditLog['type']
+        };
+      });
+      setAuditLogs(mapped);
+    } catch (err) {
+      console.error('Error fetching audit logs:', err);
+    }
+  };
+
+  const addLog = (_adminName: string, action: string, target: string, _type: AuditLog['type']) => {
+    const email = currentAdmin?.email || 'system@davv.edu';
+    let paperId: string | null = null;
+    if (target && target.includes(':')) {
+      const parsedId = target.split(':')[0].trim();
+      if (parsedId.length >= 8) {
+        paperId = parsedId;
+      }
+    }
+    
+    supabase
+      .from('elex_audit_logs')
+      .insert([{
+        paper_id: paperId,
+        admin_email: email,
+        action: `${action} - ${target}`
+      }])
+      .then(({ error }) => {
+        if (error) console.error('Error writing audit log to DB:', error);
+        refreshAuditLogs();
+      });
   };
 
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
@@ -403,25 +532,22 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const rejectResource = async (id: string, reason: string) => {
     const adminName = currentAdmin?.name || 'System';
     try {
-      // Fetch details first to get storage file url
-      const { data, error: fetchError } = await supabase
-        .from('elex_papers')
-        .select('file_url, subject_name')
-        .eq('id', id)
-        .single();
+      const targetRes = resources.find(r => r.id === id);
+      const storagePath = targetRes?.storagePath || '';
       
-      if (fetchError) throw fetchError;
-
-      // Delete from storage
-      const fileUrl = data?.file_url;
-      if (fileUrl) {
-        const fileName = getFileNameFromUrl(fileUrl);
-        if (fileName) {
-          const { error: deleteStorageError } = await supabase.storage
-            .from('papers_pdf')
-            .remove([fileName]);
-          if (deleteStorageError) {
-            console.error('Storage deletion warning:', deleteStorageError.message);
+      if (storagePath) {
+        const { error: deleteStorageError } = await supabase.storage
+          .from('papers_pdf')
+          .remove([storagePath]);
+        if (deleteStorageError) {
+          console.error('Storage deletion warning:', deleteStorageError.message);
+        }
+      } else {
+        const fileUrl = targetRes?.previewUrl;
+        if (fileUrl) {
+          const fileName = getFileNameFromUrl(fileUrl);
+          if (fileName) {
+            await supabase.storage.from('papers_pdf').remove([fileName]);
           }
         }
       }
@@ -434,7 +560,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       if (deleteDbError) throw deleteDbError;
 
-      addLog(adminName, 'REJECTED RESOURCE', `${id}: ${data?.subject_name || 'Paper'} - Reason: ${reason}`, 'danger');
+      addLog(adminName, 'REJECTED RESOURCE', `${id}: ${targetRes?.subjectName || 'Paper'} - Reason: ${reason}`, 'danger');
       await refreshResources();
       if (selectedResourceId === id) {
         setSelectedResourceId(null);
@@ -448,25 +574,22 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const deleteResource = async (id: string) => {
     const adminName = currentAdmin?.name || 'System';
     try {
-      // Fetch details first to get storage file url
-      const { data, error: fetchError } = await supabase
-        .from('elex_papers')
-        .select('file_url, subject_name')
-        .eq('id', id)
-        .single();
+      const targetRes = resources.find(r => r.id === id);
+      const storagePath = targetRes?.storagePath || '';
       
-      if (fetchError) throw fetchError;
-
-      // Delete from storage
-      const fileUrl = data?.file_url;
-      if (fileUrl) {
-        const fileName = getFileNameFromUrl(fileUrl);
-        if (fileName) {
-          const { error: deleteStorageError } = await supabase.storage
-            .from('papers_pdf')
-            .remove([fileName]);
-          if (deleteStorageError) {
-            console.error('Storage deletion warning:', deleteStorageError.message);
+      if (storagePath) {
+        const { error: deleteStorageError } = await supabase.storage
+          .from('papers_pdf')
+          .remove([storagePath]);
+        if (deleteStorageError) {
+          console.error('Storage deletion warning:', deleteStorageError.message);
+        }
+      } else {
+        const fileUrl = targetRes?.previewUrl;
+        if (fileUrl) {
+          const fileName = getFileNameFromUrl(fileUrl);
+          if (fileName) {
+            await supabase.storage.from('papers_pdf').remove([fileName]);
           }
         }
       }
@@ -479,7 +602,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       if (deleteDbError) throw deleteDbError;
 
-      addLog(adminName, 'DELETED RESOURCE PERMANENTLY', `${id}: ${data?.subject_name || 'Paper'}`, 'danger');
+      addLog(adminName, 'DELETED RESOURCE PERMANENTLY', `${id}: ${targetRes?.subjectName || 'Paper'}`, 'danger');
       await refreshResources();
       if (selectedResourceId === id) {
         setSelectedResourceId(null);
@@ -490,23 +613,28 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
-  const addComment = (id: string, text: string) => {
-    // Comments are local state since elex_papers has no comment columns.
-    const adminName = currentAdmin?.name || 'System';
-    const newComment: Comment = {
-      id: `COM-${Math.floor(1000 + Math.random() * 9000)}`,
-      author: adminName,
-      text,
-      date: new Date().toISOString().replace('T', ' ').substring(0, 19),
-    };
-
-    setResources(prev => prev.map(res => {
-      if (res.id === id) {
-        return { ...res, comments: [...res.comments, newComment] };
+  const addComment = async (id: string, text: string) => {
+    const email = currentAdmin?.email || 'system@davv.edu';
+    try {
+      const { error } = await supabase
+        .from('elex_paper_comments')
+        .insert([
+          {
+            paper_id: id,
+            comment: text,
+            admin_email: email
+          }
+        ]);
+      if (error) throw error;
+      addLog(currentAdmin?.name || 'System', 'COMMENT ADDED', `To resource ${id}: "${text.substring(0, 20)}..."`, 'info');
+      // Refresh comments for the selected resource if needed
+      if (selectedResourceId === id) {
+        await fetchCommentsForSelected(id);
       }
-      return res;
-    }));
-    addLog(adminName, 'COMMENT ADDED', `To resource ${id}: "${text.substring(0, 20)}..."`, 'info');
+    } catch (err) {
+      console.error('Error adding comment:', err);
+      // Optionally, show a user-facing error message here
+    }
   };
 
   const updateSettings = (profile: { name: string; email: string }, newPreferences: any) => {
@@ -530,6 +658,7 @@ export const AdminProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       auditLogs,
       activePage,
       selectedResourceId,
+      selectedResource,
       searchQuery,
       isLoading,
       authLoading,

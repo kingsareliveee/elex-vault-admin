@@ -3,6 +3,16 @@ import { useAdmin } from '../context/AdminContext';
 import { supabase } from '../supabaseClient';
 import { Eye, Check, X, Trash2, Search, SlidersHorizontal, AlertCircle, Loader2, AlertTriangle, ShieldAlert } from 'lucide-react';
 
+const formatSafeDate = (dateStr: any) => {
+  if (!dateStr) return 'N/A';
+  try {
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? 'N/A' : d.toLocaleString();
+  } catch (err) {
+    return 'N/A';
+  }
+};
+
 export const PendingQueue: React.FC = () => {
   const { approveResource, rejectResource, deleteResource, setSelectedResourceId, setActivePage, refreshResources, resources } = useAdmin();
 
@@ -17,6 +27,11 @@ export const PendingQueue: React.FC = () => {
   const [filterType, setFilterType] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [showFiltersMobile, setShowFiltersMobile] = useState(false);
+  
+  // Pagination States
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const ITEMS_PER_PAGE = 10;
   
   // Rejection states
   const [rejectId, setRejectId] = useState<string | null>(null);
@@ -56,15 +71,46 @@ export const PendingQueue: React.FC = () => {
     setLoading(true);
     setLocalError(null);
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from("elex_papers")
-        .select("*")
+        .select("*", { count: 'exact' })
         .eq("is_approved", false);
+
+      if (filterCourse !== 'ALL') {
+        const val = filterCourse === 'BSc Electronics' ? 'bsc' : 'imtech';
+        query = query.eq('course', val);
+      }
+      if (filterSem !== 'ALL') {
+        query = query.eq('semester', `sem_${filterSem}`);
+      }
+      if (filterType !== 'ALL') {
+        const typeMap: Record<string, string> = {
+          'MST 1': 'mst_1',
+          'MST 2': 'mst_2',
+          'MST 3': 'mst_3',
+          'EndSem': 'endsem',
+          'Syllabus': 'syllabus',
+          'Assignment': 'assignment'
+        };
+        query = query.eq('resource_type', typeMap[filterType] || filterType);
+      }
+      if (searchQuery.trim() !== '') {
+        query = query.or(`subject_code.ilike.%${searchQuery}%,subject_name.ilike.%${searchQuery}%,contributor_name.ilike.%${searchQuery}%`);
+      }
+
+      const from = (currentPage - 1) * ITEMS_PER_PAGE;
+      const to = from + ITEMS_PER_PAGE - 1;
+
+      const { data, error, count } = await query
+        .order("created_at", { ascending: false })
+        .range(from, to);
 
       console.log("DIRECT PENDING QUERY:", data);
       console.log("DIRECT PENDING ERROR:", error);
 
-      if (!error && data) {
+      if (error) throw error;
+
+      if (data) {
         const mapped = data.map(row => ({
           id: row.id,
           subjectName: row.subject_name,
@@ -76,13 +122,12 @@ export const PendingQueue: React.FC = () => {
           subjectCode: row.subject_code,
           resourceType: row.resource_type,
           isApproved: row.is_approved,
-          uploadDate: row.created_at || new Date().toISOString()
+          uploadDate: row.created_at || new Date().toISOString(),
+          storagePath: row.storage_path
         }));
 
-        console.log("MAPPED PENDING RESOURCES:", mapped);
         setPendingResources(mapped);
-      } else if (error) {
-        throw error;
+        setTotalItems(count || 0);
       }
     } catch (err: any) {
       console.error("Error fetching pending resources directly:", err);
@@ -93,8 +138,12 @@ export const PendingQueue: React.FC = () => {
   };
 
   useEffect(() => {
+    setCurrentPage(1);
+  }, [filterCourse, filterSem, filterType, searchQuery]);
+
+  useEffect(() => {
     fetchPendingResources();
-  }, []);
+  }, [currentPage, filterCourse, filterSem, filterType, searchQuery]);
 
   useEffect(() => {
     console.log("pendingResources STATE UPDATE:", pendingResources);
@@ -105,33 +154,8 @@ export const PendingQueue: React.FC = () => {
   const semesters = ['ALL', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
   const resourceTypes = ['ALL', 'MST 1', 'MST 2', 'MST 3', 'EndSem', 'Syllabus', 'Assignment'];
 
-  // Apply filters
-  const filteredList = pendingResources.filter(res => {
-    const matchesCourse = filterCourse === 'ALL' || 
-      res.course === filterCourse ||
-      (filterCourse === 'BSc Electronics' && res.course === 'bsc') ||
-      (filterCourse === 'Integrated MTech Electronics' && res.course === 'imtech');
-
-    const matchesSem = filterSem === 'ALL' || 
-      (res.semester && res.semester.toString() === filterSem);
-
-    const matchesType = filterType === 'ALL' || 
-      res.resourceType === filterType ||
-      (filterType === 'MST 1' && res.resourceType === 'mst_1') ||
-      (filterType === 'MST 2' && res.resourceType === 'mst_2') ||
-      (filterType === 'MST 3' && res.resourceType === 'mst_3') ||
-      (filterType === 'EndSem' && res.resourceType === 'endsem') ||
-      (filterType === 'Syllabus' && res.resourceType === 'syllabus') ||
-      (filterType === 'Assignment' && res.resourceType === 'assignment');
-
-    const matchesQuery = 
-      (res.contributorName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (res.subjectName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (res.subjectCode || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (res.id || '').toString().toLowerCase().includes(searchQuery.toLowerCase());
-      
-    return matchesCourse && matchesSem && matchesType && matchesQuery;
-  });
+  // Already filtered and paginated server-side
+  const filteredList = pendingResources;
 
   const getResourceTypeLabel = (type: string) => {
     const typeMap: Record<string, string> = {
@@ -353,7 +377,7 @@ export const PendingQueue: React.FC = () => {
                           )}
                         </div>
                         <div className="text-[10px] text-zinc-500 mt-0.5 font-mono">
-                          {new Date(res.uploadDate).toLocaleString()}
+                          {formatSafeDate(res.uploadDate)}
                         </div>
                       </td>
                       <td className="px-5 py-3.5">
@@ -456,7 +480,7 @@ export const PendingQueue: React.FC = () => {
                           )}
                         </div>
                         <div className="text-[10px] text-zinc-500 font-mono">
-                          {new Date(res.uploadDate).toLocaleString()}
+                          {formatSafeDate(res.uploadDate)}
                         </div>
                       </div>
                       
@@ -504,6 +528,36 @@ export const PendingQueue: React.FC = () => {
                   </div>
                 ))}
               </div>
+
+              {/* Pagination Controls */}
+              {totalItems > ITEMS_PER_PAGE && (
+                <div className="px-5 py-4 border-t border-zinc-800 bg-obsidian-950/40 flex items-center justify-between text-xs text-zinc-400 select-none">
+                  <div>
+                    Showing <span className="font-bold text-zinc-200">{Math.min(totalItems, (currentPage - 1) * ITEMS_PER_PAGE + 1)}</span> to{' '}
+                    <span className="font-bold text-zinc-200">{Math.min(totalItems, currentPage * ITEMS_PER_PAGE)}</span> of{' '}
+                    <span className="font-bold text-zinc-200">{totalItems}</span> resources
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      className="px-3 py-1.5 rounded-lg border border-zinc-800 bg-obsidian-950 hover:bg-zinc-850 text-zinc-300 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+                    >
+                      Previous
+                    </button>
+                    <span className="text-zinc-500 font-mono">
+                      Page {currentPage} of {Math.ceil(totalItems / ITEMS_PER_PAGE)}
+                    </span>
+                    <button
+                      disabled={currentPage >= Math.ceil(totalItems / ITEMS_PER_PAGE)}
+                      onClick={() => setCurrentPage(prev => prev + 1)}
+                      className="px-3 py-1.5 rounded-lg border border-zinc-800 bg-obsidian-950 hover:bg-zinc-850 text-zinc-300 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>

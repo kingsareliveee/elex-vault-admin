@@ -1,9 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAdmin } from '../context/AdminContext';
 import { Search, SlidersHorizontal, AlertCircle, FileText } from 'lucide-react';
 
 export const RejectedResources: React.FC = () => {
-  const { auditLogs } = useAdmin();
+  const { auditLogs, refreshResources } = useAdmin();
+
+  useEffect(() => {
+    refreshResources();
+  }, []);
 
   const [searchQuery, setSearchQuery] = useState('');
 

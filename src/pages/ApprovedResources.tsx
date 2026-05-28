@@ -1,9 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { useAdmin } from '../context/AdminContext';
 import { Eye, X, Trash2, Search, SlidersHorizontal, AlertCircle, Database, Loader2 } from 'lucide-react';
+import { supabase } from '../supabaseClient';
+
+const formatSafeDate = (dateStr: any) => {
+  if (!dateStr) return 'N/A';
+  try {
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? 'N/A' : d.toLocaleDateString();
+  } catch (err) {
+    return 'N/A';
+  }
+};
 
 export const ApprovedResources: React.FC = () => {
-  const { resources, rejectResource, deleteResource, setSelectedResourceId, setActivePage, refreshResources, isLoading } = useAdmin();
+  const { rejectResource, deleteResource, setSelectedResourceId, setActivePage } = useAdmin();
 
   // Filters
   const [filterCourse, setFilterCourse] = useState('ALL');
@@ -16,30 +27,91 @@ export const ApprovedResources: React.FC = () => {
   const [revokeId, setRevokeId] = useState<string | null>(null);
   const [revokeReason, setRevokeReason] = useState('');
 
-  useEffect(() => {
-    refreshResources();
-  }, []);
+  // Pagination and Database States
+  const [approvedResources, setApprovedResources] = useState<any[]>([]);
+  const [localLoading, setLocalLoading] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const ITEMS_PER_PAGE = 10;
 
-  const approvedResources = resources.filter(r => r.isApproved === true);
+  const fetchApprovedResources = async () => {
+    setLocalLoading(true);
+    try {
+      let query = supabase
+        .from("elex_papers")
+        .select("*", { count: 'exact' })
+        .eq("is_approved", true);
+
+      if (filterCourse !== 'ALL') {
+        const val = filterCourse === 'BSc Electronics' ? 'bsc' : 'imtech';
+        query = query.eq('course', val);
+      }
+      if (filterSem !== 'ALL') {
+        query = query.eq('semester', `sem_${filterSem}`);
+      }
+      if (filterType !== 'ALL') {
+        const typeMap: Record<string, string> = {
+          'MST 1': 'mst_1',
+          'MST 2': 'mst_2',
+          'MST 3': 'mst_3',
+          'EndSem': 'endsem',
+          'Syllabus': 'syllabus',
+          'Assignment': 'assignment'
+        };
+        query = query.eq('resource_type', typeMap[filterType] || filterType);
+      }
+      if (searchQuery.trim() !== '') {
+        query = query.or(`subject_code.ilike.%${searchQuery}%,subject_name.ilike.%${searchQuery}%,contributor_name.ilike.%${searchQuery}%`);
+      }
+
+      const from = (currentPage - 1) * ITEMS_PER_PAGE;
+      const to = from + ITEMS_PER_PAGE - 1;
+
+      const { data, error, count } = await query
+        .order("created_at", { ascending: false })
+        .range(from, to);
+
+      if (error) throw error;
+
+      if (data) {
+        const mapped = data.map(row => ({
+          id: row.id.toString(),
+          contributorName: row.contributor_name || 'Anonymous',
+          subjectName: row.subject_name || 'Unknown Subject',
+          subjectCode: row.subject_code || 'N/A',
+          semester: row.semester ? parseInt(row.semester.replace('sem_', '')) || 1 : 1,
+          course: row.course === 'bsc' ? 'BSc Electronics' : row.course === 'imtech' ? 'Integrated MTech Electronics' : row.course || 'General',
+          resourceType: row.resource_type || 'EndSem',
+          uploadDate: row.created_at || new Date().toISOString(),
+          isApproved: true,
+          storagePath: row.storage_path || '',
+          previewUrl: row.file_url || ''
+        }));
+        setApprovedResources(mapped);
+        setTotalItems(count || 0);
+      }
+    } catch (err) {
+      console.error("Error fetching approved resources:", err);
+    } finally {
+      setLocalLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterCourse, filterSem, filterType, searchQuery]);
+
+  useEffect(() => {
+    fetchApprovedResources();
+  }, [currentPage, filterCourse, filterSem, filterType, searchQuery]);
 
   // Available options
   const courses = ['ALL', 'BSc Electronics', 'Integrated MTech Electronics'];
   const semesters = ['ALL', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
   const resourceTypes = ['ALL', 'MST 1', 'MST 2', 'MST 3', 'EndSem', 'Syllabus', 'Assignment'];
 
-  // Apply filters
-  const filteredList = approvedResources.filter(res => {
-    const matchesCourse = filterCourse === 'ALL' || res.course === filterCourse;
-    const matchesSem = filterSem === 'ALL' || res.semester.toString() === filterSem;
-    const matchesType = filterType === 'ALL' || res.resourceType === filterType;
-    const matchesQuery = 
-      res.contributorName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      res.subjectName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      res.subjectCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      res.id.toLowerCase().includes(searchQuery.toLowerCase());
-      
-    return matchesCourse && matchesSem && matchesType && matchesQuery;
-  });
+  // Already filtered and paginated server-side
+  const filteredList = approvedResources;
 
   const handlePreview = (id: string) => {
     setSelectedResourceId(id);
@@ -57,11 +129,13 @@ export const ApprovedResources: React.FC = () => {
     // Revoking approval deletes resource from production indexing
     await rejectResource(revokeId, revokeReason);
     setRevokeId(null);
+    await fetchApprovedResources();
   };
 
   const handleDelete = async (id: string) => {
     if (confirm(`Confirm permanent deletion and storage purge of approved resource ${id}?`)) {
       await deleteResource(id);
+      await fetchApprovedResources();
     }
   };
 
@@ -147,7 +221,7 @@ export const ApprovedResources: React.FC = () => {
         </div>
 
         <div className="overflow-x-auto">
-          {isLoading ? (
+          {localLoading ? (
             <div className="text-center py-16">
               <Loader2 className="h-8 w-8 animate-spin text-blue-500 mx-auto mb-2" />
               <p className="text-xs text-zinc-550">Fetching database records...</p>
@@ -235,7 +309,7 @@ export const ApprovedResources: React.FC = () => {
                         </span>
                         <span className="font-mono text-zinc-550 text-[10px] font-bold select-all">#{res.id.substring(0, 8)}</span>
                       </div>
-                      <span className="text-[10px] text-zinc-500 font-mono">{res.uploadDate.split(' ')[0]}</span>
+                      <span className="text-[10px] text-zinc-500 font-mono">{formatSafeDate(res.uploadDate)}</span>
                     </div>
 
                     <div className="space-y-1">
@@ -275,6 +349,36 @@ export const ApprovedResources: React.FC = () => {
                   </div>
                 ))}
               </div>
+
+              {/* Pagination Controls */}
+              {totalItems > ITEMS_PER_PAGE && (
+                <div className="px-5 py-4 border-t border-zinc-800 bg-obsidian-950/40 flex items-center justify-between text-xs text-zinc-400 select-none">
+                  <div>
+                    Showing <span className="font-bold text-zinc-200">{Math.min(totalItems, (currentPage - 1) * ITEMS_PER_PAGE + 1)}</span> to{' '}
+                    <span className="font-bold text-zinc-200">{Math.min(totalItems, currentPage * ITEMS_PER_PAGE)}</span> of{' '}
+                    <span className="font-bold text-zinc-200">{totalItems}</span> resources
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      className="px-3 py-1.5 rounded-lg border border-zinc-800 bg-obsidian-950 hover:bg-zinc-850 text-zinc-300 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+                    >
+                      Previous
+                    </button>
+                    <span className="text-zinc-500 font-mono">
+                      Page {currentPage} of {Math.ceil(totalItems / ITEMS_PER_PAGE)}
+                    </span>
+                    <button
+                      disabled={currentPage >= Math.ceil(totalItems / ITEMS_PER_PAGE)}
+                      onClick={() => setCurrentPage(prev => prev + 1)}
+                      className="px-3 py-1.5 rounded-lg border border-zinc-800 bg-obsidian-950 hover:bg-zinc-850 text-zinc-300 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>

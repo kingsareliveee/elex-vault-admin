@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAdmin } from '../context/AdminContext';
 import type { Resource } from '../context/AdminContext';
+import { supabase } from '../supabaseClient';
 import { 
   Check, 
   X, 
@@ -12,7 +13,8 @@ import {
   Send,
   ExternalLink,
   Download,
-  AlertCircle
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 
 interface PDFViewerProps {
@@ -21,12 +23,70 @@ interface PDFViewerProps {
 }
 
 export const PDFViewer: React.FC<PDFViewerProps> = ({ resource, onBack }) => {
-  const { approveResource, rejectResource, deleteResource, addComment, setActivePage } = useAdmin();
+  const { approveResource, rejectResource, deleteResource, setActivePage, currentAdmin } = useAdmin();
   
   const [activeTab, setActiveTab] = useState<'info' | 'comments'>('info');
   const [commentText, setCommentText] = useState('');
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
+
+  const [commentsList, setCommentsList] = useState<any[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+
+  const fetchComments = async () => {
+    setCommentsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('elex_paper_comments')
+        .select('*')
+        .eq('paper_id', resource.id)
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+
+      if (data) {
+        const mapped = data.map(c => ({
+          id: c.id.toString(),
+          author: c.admin_email ? c.admin_email.split('@')[0] : 'System',
+          text: c.comment,
+          date: c.created_at 
+            ? new Date(c.created_at).toISOString().replace('T', ' ').substring(0, 19)
+            : new Date().toISOString().replace('T', ' ').substring(0, 19)
+        }));
+        setCommentsList(mapped);
+      }
+    } catch (err) {
+      console.error('Error fetching comments:', err);
+    } finally {
+      setCommentsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchComments();
+  }, [resource.id]);
+
+  const handleAddComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!commentText.trim()) return;
+
+    const email = currentAdmin?.email || 'system@davv.edu';
+    try {
+      const { error } = await supabase
+        .from('elex_paper_comments')
+        .insert([{
+          paper_id: resource.id,
+          comment: commentText,
+          admin_email: email
+        }]);
+
+      if (error) throw error;
+      setCommentText('');
+      await fetchComments();
+    } catch (err) {
+      console.error('Error adding comment:', err);
+    }
+  };
 
   const handleApprove = async () => {
     if (confirm('Approve this resource and publish it to ELEX Vault?')) {
@@ -51,13 +111,6 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ resource, onBack }) => {
       if (onBack) onBack();
       else setActivePage('pending');
     }
-  };
-
-  const handleAddComment = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!commentText.trim()) return;
-    addComment(resource.id, commentText);
-    setCommentText('');
   };
 
   const handleOpenNewTab = () => {
@@ -146,7 +199,7 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ resource, onBack }) => {
               activeTab === 'comments' ? 'text-white bg-obsidian-900 border-b-2 border-b-blue-500' : 'text-zinc-500 hover:text-zinc-300'
             }`}
           >
-            COMMENTS ({resource.comments.length})
+            COMMENTS ({commentsList.length})
           </button>
         </div>
 
@@ -211,13 +264,17 @@ export const PDFViewer: React.FC<PDFViewerProps> = ({ resource, onBack }) => {
             <div className="flex flex-col h-full space-y-4">
               {/* Comment logs */}
               <div className="flex-1 space-y-3 max-h-[250px] overflow-y-auto pr-1">
-                {resource.comments.length === 0 ? (
+                {commentsLoading ? (
+                  <div className="text-center py-8">
+                    <Loader2 className="h-5 w-5 animate-spin text-blue-500 mx-auto" />
+                  </div>
+                ) : commentsList.length === 0 ? (
                   <div className="text-center py-8 text-zinc-500 text-xs">
                     <MessageSquare className="h-6 w-6 mx-auto mb-2 opacity-30 text-zinc-400" />
                     <span>No moderator notes recorded.</span>
                   </div>
                 ) : (
-                  resource.comments.map((comment) => (
+                  commentsList.map((comment) => (
                     <div key={comment.id} className="p-2.5 bg-obsidian-950 border border-zinc-850 rounded-lg text-xs">
                       <div className="flex justify-between text-zinc-550 mb-1 border-b border-zinc-900 pb-1 font-semibold">
                         <span className="text-blue-500">{comment.author}</span>

@@ -1,17 +1,18 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import { AdminProvider, useAdmin } from './context/AdminContext';
 import { Sidebar } from './components/Sidebar';
 import { Topbar } from './components/Topbar';
-import { Login } from './pages/Login';
-import { Signup } from './pages/Signup';
-import { ForgotPassword } from './pages/ForgotPassword';
-import { Dashboard } from './pages/Dashboard';
-import { PendingQueue } from './pages/PendingQueue';
-import { ApprovedResources } from './pages/ApprovedResources';
-import { RejectedResources } from './pages/RejectedResources';
-import { ResourceViewerPage } from './pages/ResourceViewerPage';
-import { Analytics } from './pages/Analytics';
-import { Settings } from './pages/Settings';
+
+const Login = React.lazy(() => import('./pages/Login').then(m => ({ default: m.Login })));
+const Signup = React.lazy(() => import('./pages/Signup').then(m => ({ default: m.Signup })));
+const ForgotPassword = React.lazy(() => import('./pages/ForgotPassword').then(m => ({ default: m.ForgotPassword })));
+const Dashboard = React.lazy(() => import('./pages/Dashboard').then(m => ({ default: m.Dashboard })));
+const PendingQueue = React.lazy(() => import('./pages/PendingQueue').then(m => ({ default: m.PendingQueue })));
+const ApprovedResources = React.lazy(() => import('./pages/ApprovedResources').then(m => ({ default: m.ApprovedResources })));
+const RejectedResources = React.lazy(() => import('./pages/RejectedResources').then(m => ({ default: m.RejectedResources })));
+const ResourceViewerPage = React.lazy(() => import('./pages/ResourceViewerPage').then(m => ({ default: m.ResourceViewerPage })));
+const Analytics = React.lazy(() => import('./pages/Analytics').then(m => ({ default: m.Analytics })));
+const Settings = React.lazy(() => import('./pages/Settings').then(m => ({ default: m.Settings })));
 import { 
   Loader2,
   X,
@@ -43,15 +44,22 @@ const AppContent: React.FC = () => {
 
   // If not logged in, render authentication pages
   if (!currentAdmin) {
-    switch (activePage) {
-      case 'signup':
-        return <Signup />;
-      case 'forgot-password':
-        return <ForgotPassword />;
-      case 'login':
-      default:
-        return <Login />;
-    }
+    return (
+      <Suspense fallback={
+        <div className="min-h-screen w-screen elex-navy-bg flex items-center justify-center font-sans">
+          <div className="absolute inset-0 elex-grid-overlay opacity-30 pointer-events-none"></div>
+          <Loader2 className="h-8 w-8 animate-spin text-blue-500 relative z-10" />
+        </div>
+      }>
+        {(() => {
+          switch (activePage) {
+            case 'signup': return <Signup />;
+            case 'forgot-password': return <ForgotPassword />;
+            case 'login': default: return <Login />;
+          }
+        })()}
+      </Suspense>
+    );
   }
 
   const pendingCount = resources.filter(r => r.isApproved === false).length;
@@ -176,26 +184,20 @@ const AppContent: React.FC = () => {
 
         {/* Dynamic Page Router */}
         <main className="flex-1 overflow-y-auto">
-          {(() => {
-            switch (activePage) {
-              case 'dashboard':
-                return <Dashboard />;
-              case 'pending':
-                return <PendingQueue />;
-              case 'approved':
-                return <ApprovedResources />;
-              case 'rejected':
-                return <RejectedResources />;
-              case 'viewer':
-                return <ResourceViewerPage />;
-              case 'analytics':
-                return <Analytics />;
-              case 'settings':
-                return <Settings />;
-              default:
-                return <Dashboard />;
-            }
-          })()}
+          <Suspense fallback={<div className="flex h-full items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-blue-500" /></div>}>
+            {(() => {
+              switch (activePage) {
+                case 'dashboard': return <Dashboard />;
+                case 'pending': return <PendingQueue />;
+                case 'approved': return <ApprovedResources />;
+                case 'rejected': return <RejectedResources />;
+                case 'viewer': return <ResourceViewerPage />;
+                case 'analytics': return <Analytics />;
+                case 'settings': return <Settings />;
+                default: return <Dashboard />;
+              }
+            })()}
+          </Suspense>
         </main>
       </div>
     </div>
