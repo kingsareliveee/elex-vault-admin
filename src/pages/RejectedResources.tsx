@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAdmin } from '../context/AdminContext';
-import { Search, SlidersHorizontal, AlertCircle, FileText, Trash2, Eye } from 'lucide-react';
+import { Search, SlidersHorizontal, FileText, Trash2, Eye, Loader2 } from 'lucide-react';
+import { supabase } from '../supabaseClient';
 
 const formatSafeDate = (dateStr: any) => {
   if (!dateStr) return 'N/A';
@@ -13,23 +14,71 @@ const formatSafeDate = (dateStr: any) => {
 };
 
 export const RejectedResources: React.FC = () => {
-  const { resources, refreshResources, setSelectedResourceId, setActivePage, deleteResource } = useAdmin();
+  const { refreshResources, setSelectedResourceId, setActivePage, deleteResource } = useAdmin();
 
-  useEffect(() => {
-    refreshResources();
-  }, []);
-
+  // Pagination and Database States
+  const [rejectedResources, setRejectedResources] = useState<any[]>([]);
+  const [localLoading, setLocalLoading] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const ITEMS_PER_PAGE = 10;
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Fetch rejected resources directly from DB mapping
-  const rejectedResources = resources.filter(r => r.status === 'rejected');
+  const fetchRejectedResources = async () => {
+    setLocalLoading(true);
+    try {
+      let query = supabase
+        .from("elex_papers")
+        .select("*", { count: 'exact' })
+        .eq('moderation_status', 'rejected');
 
-  // Apply search query
-  const filteredList = rejectedResources.filter(res => 
-    res.subjectCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    res.contributorName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    res.id.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+      if (searchQuery.trim() !== '') {
+        query = query.or(`subject_code.ilike.%${searchQuery}%,subject_name.ilike.%${searchQuery}%,contributor_name.ilike.%${searchQuery}%`);
+      }
+
+      const from = (currentPage - 1) * ITEMS_PER_PAGE;
+      const to = from + ITEMS_PER_PAGE - 1;
+
+      const { data, error, count } = await query
+        .order("created_at", { ascending: false })
+        .range(from, to);
+
+      if (error) throw error;
+
+      if (data) {
+        const mapped = data.map(row => ({
+          id: row.id.toString(),
+          contributorName: row.contributor_name || 'Anonymous',
+          subjectName: row.subject_name || 'Unknown Subject',
+          subjectCode: row.subject_code || 'N/A',
+          semester: row.semester ? parseInt(row.semester.replace('sem_', '')) || 1 : 1,
+          course: row.course === 'bsc' ? 'BSc Electronics' : row.course === 'imtech' ? 'Integrated MTech Electronics' : row.course || 'General',
+          resourceType: row.resource_type || 'EndSem',
+          uploadDate: row.created_at || new Date().toISOString(),
+          isApproved: false,
+          status: 'rejected',
+          storagePath: row.storage_path || '',
+          previewUrl: row.file_url || ''
+        }));
+        setRejectedResources(mapped);
+        setTotalItems(count || 0);
+      }
+    } catch (err) {
+      console.error("Error fetching rejected resources:", err);
+    } finally {
+      setLocalLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    fetchRejectedResources();
+  }, [currentPage, searchQuery]);
+
+  const filteredList = rejectedResources;
 
   const handlePreview = (id: string) => {
     setSelectedResourceId(id);
@@ -40,6 +89,7 @@ export const RejectedResources: React.FC = () => {
     if (confirm(`Confirm permanent deletion and storage purge of rejected resource ${id}?`)) {
       await deleteResource(id);
       await refreshResources();
+      await fetchRejectedResources();
     }
   };
 
@@ -88,7 +138,12 @@ export const RejectedResources: React.FC = () => {
         </div>
 
         <div className="overflow-x-auto">
-          {filteredList.length === 0 ? (
+          {localLoading ? (
+            <div className="text-center py-16">
+              <Loader2 className="h-8 w-8 animate-spin text-red-500 mx-auto mb-2" />
+              <p className="text-xs text-zinc-550">Fetching archive records...</p>
+            </div>
+          ) : filteredList.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 space-y-3 text-center">
               <div className="relative flex items-center justify-center h-10 w-10 rounded-full bg-zinc-800/20 border border-zinc-800/40">
                 <FileText className="h-4 w-4 text-zinc-500/50" />
@@ -193,6 +248,36 @@ export const RejectedResources: React.FC = () => {
                   </div>
                 ))}
               </div>
+
+              {/* Pagination Controls */}
+              {totalItems > ITEMS_PER_PAGE && (
+                <div className="px-5 py-4 border-t border-zinc-800 bg-obsidian-950/40 flex items-center justify-between text-xs text-zinc-400 select-none">
+                  <div>
+                    Showing <span className="font-bold text-zinc-200">{Math.min(totalItems, (currentPage - 1) * ITEMS_PER_PAGE + 1)}</span> to{' '}
+                    <span className="font-bold text-zinc-200">{Math.min(totalItems, currentPage * ITEMS_PER_PAGE)}</span> of{' '}
+                    <span className="font-bold text-zinc-200">{totalItems}</span> resources
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      className="px-3 py-1.5 rounded-lg border border-zinc-800 bg-obsidian-950 hover:bg-zinc-850 text-zinc-300 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+                    >
+                      Previous
+                    </button>
+                    <span className="text-zinc-500 font-mono">
+                      Page {currentPage} of {Math.ceil(totalItems / ITEMS_PER_PAGE)}
+                    </span>
+                    <button
+                      disabled={currentPage >= Math.ceil(totalItems / ITEMS_PER_PAGE)}
+                      onClick={() => setCurrentPage(prev => prev + 1)}
+                      className="px-3 py-1.5 rounded-lg border border-zinc-800 bg-obsidian-950 hover:bg-zinc-850 text-zinc-300 disabled:opacity-30 disabled:pointer-events-none transition cursor-pointer"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
